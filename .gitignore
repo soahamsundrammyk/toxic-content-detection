@@ -1,0 +1,22 @@
+# Data (too large for git, Kaggle terms prohibit redistribution)
+data/*.csv
+data/*.zip
+data/*.txt
+
+# Model checkpoints (too large)
+models/*.pt
+models/*.bin
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environment
+venv/
+.venv/
+
+# OS files
+.DS_Store
