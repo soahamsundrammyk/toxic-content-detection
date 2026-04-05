@@ -1,0 +1,53 @@
+{
+  "model": "tfidf_logreg",
+  "per_label": {
+    "toxic": {
+      "f1": 0.7363,
+      "precision": 0.6397,
+      "recall": 0.8672,
+      "support": 1529,
+      "roc_auc": 0.9719
+    },
+    "severe_toxic": {
+      "f1": 0.4119,
+      "precision": 0.2752,
+      "recall": 0.8187,
+      "support": 160,
+      "roc_auc": 0.9861
+    },
+    "obscene": {
+      "f1": 0.7762,
+      "precision": 0.6848,
+      "recall": 0.8957,
+      "support": 844,
+      "roc_auc": 0.9862
+    },
+    "threat": {
+      "f1": 0.4048,
+      "precision": 0.2833,
+      "recall": 0.7083,
+      "support": 48,
+      "roc_auc": 0.9889
+    },
+    "insult": {
+      "f1": 0.6723,
+      "precision": 0.5515,
+      "recall": 0.8608,
+      "support": 790,
+      "roc_auc": 0.979
+    },
+    "identity_hate": {
+      "f1": 0.3783,
+      "precision": 0.2512,
+      "recall": 0.766,
+      "support": 141,
+      "roc_auc": 0.974
+    }
+  },
+  "macro": {
+    "f1": 0.5633,
+    "precision": 0.4476,
+    "recall": 0.8195,
+    "roc_auc": 0.981
+  }
+}
