@@ -5,14 +5,19 @@ This module handles:
 1. Loading the CSV data
 2. Basic text cleaning
 3. Stratified train/val/test splitting
+4. Vocabulary building (word → index mapping)
+5. PyTorch Dataset classes for deep learning
 """
 
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Tuple
 
 import numpy as np
 import pandas as pd
+import torch
+from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 
 
@@ -211,3 +216,167 @@ def print_split_summary(
         val_pct = val_df[label].mean() * 100
         test_pct = test_df[label].mean() * 100
         print(f"{label:<15} {train_pct:>6.2f}% {val_pct:>6.2f}% {test_pct:>6.2f}%")
+
+
+# ============================================================================
+# PYTORCH DATA PIPELINE (for Phase 2+)
+# ============================================================================
+
+
+class Vocabulary:
+    """Maps words to integer indices and back.
+
+    Why do we need this?
+    Neural networks can't process strings like "idiot" — they need numbers.
+    The Vocabulary creates a mapping:
+        "idiot"  → 42
+        "stupid" → 891
+        "hello"  → 7
+        (unknown word) → 1  (the <UNK> token)
+        (padding)      → 0  (the <PAD> token)
+
+    Special tokens:
+        <PAD> = 0  — used to fill short sequences to equal length.
+                     All comments must be the same length in a batch,
+                     so short ones get padded with zeros.
+        <UNK> = 1  — used for words not in our vocabulary.
+                     If the model sees a word during validation that
+                     it never saw during training, it maps to <UNK>.
+    """
+
+    def __init__(self, max_size: int = 50000):
+        """
+        Args:
+            max_size: Maximum vocabulary size.
+                      Only keep the most common words.
+                      Same idea as max_features in TF-IDF.
+        """
+        self.word_to_idx = {'<PAD>': 0, '<UNK>': 1}
+        self.idx_to_word = {0: '<PAD>', 1: '<UNK>'}
+        self.max_size = max_size
+
+    def build(self, texts: pd.Series) -> 'Vocabulary':
+        """Build vocabulary from a pandas Series of text.
+
+        IMPORTANT: Only call this on TRAINING data!
+        If we included val/test words, that would be data leakage —
+        the model would "know" about words it shouldn't have seen yet.
+
+        Args:
+            texts: pandas Series of comment strings
+
+        Returns:
+            self (so you can chain: vocab = Vocabulary().build(texts))
+        """
+        # Counter counts how many times each word appears
+        # e.g., Counter({'the': 490031, 'to': 294069, 'idiot': 1523, ...})
+        counter = Counter()
+        for text in texts:
+            words = clean_text(text).split()
+            counter.update(words)
+
+        # Keep only the most common words (minus 2 for PAD and UNK)
+        # .most_common(N) returns the N most frequent words
+        for word, count in counter.most_common(self.max_size - 2):
+            idx = len(self.word_to_idx)
+            self.word_to_idx[word] = idx
+            self.idx_to_word[idx] = word
+
+        print(f"Vocabulary built: {len(self.word_to_idx):,} words "
+              f"(from {len(counter):,} unique words in training data)")
+        return self
+
+    def encode(self, text: str, max_length: int = 200) -> list:
+        """Convert text to a list of integer indices.
+
+        Steps:
+            1. Clean the text (lowercase, normalize whitespace)
+            2. Split into words
+            3. Map each word to its index (or <UNK> if unknown)
+            4. Truncate if too long
+            5. Pad with zeros if too short
+
+        Args:
+            text: Input comment text
+            max_length: All sequences will be exactly this long.
+                        Longer → truncated. Shorter → padded with 0s.
+                        200 words covers ~95% of comments without wasting memory.
+
+        Returns:
+            List of integers, always exactly max_length long.
+
+        Example:
+            vocab.encode("you are an idiot", max_length=6)
+            → [42, 8, 15, 891, 0, 0]
+               ↑   ↑   ↑   ↑   ↑  ↑
+              you  are  an idiot PAD PAD
+        """
+        words = clean_text(text).split()
+
+        # Convert words to indices
+        # .get(word, 1) means: look up the word, if not found return 1 (<UNK>)
+        indices = [self.word_to_idx.get(w, 1) for w in words]
+
+        # Truncate if longer than max_length
+        indices = indices[:max_length]
+
+        # Pad with zeros if shorter than max_length
+        padding_needed = max_length - len(indices)
+        indices = indices + [0] * padding_needed
+
+        return indices
+
+    def __len__(self) -> int:
+        """Number of words in the vocabulary."""
+        return len(self.word_to_idx)
+
+
+class ToxicDataset(Dataset):
+    """PyTorch Dataset for the Jigsaw toxic comment data.
+
+    A Dataset is like a smart list. PyTorch's DataLoader calls:
+        dataset[0]  → returns first comment (encoded) + its labels
+        dataset[42] → returns comment #42 (encoded) + its labels
+        len(dataset) → how many comments total
+
+    The DataLoader then groups these into batches:
+        batch = [dataset[0], dataset[1], ..., dataset[31]]  (batch_size=32)
+    """
+
+    def __init__(self, df: pd.DataFrame, vocab: Vocabulary, max_length: int = 200):
+        """
+        Args:
+            df: DataFrame with 'comment_text' and the 6 label columns
+            vocab: Vocabulary object for encoding text → indices
+            max_length: Maximum sequence length (pad/truncate to this)
+        """
+        self.texts = df['comment_text'].tolist()
+        # .astype(np.float32) because PyTorch expects float, not int, for labels
+        self.labels = df[LABEL_COLS].values.astype(np.float32)
+        self.vocab = vocab
+        self.max_length = max_length
+
+    def __len__(self) -> int:
+        """How many samples in the dataset."""
+        return len(self.texts)
+
+    def __getitem__(self, idx: int) -> dict:
+        """Get one sample by index.
+
+        This is called by DataLoader when it builds a batch.
+
+        Args:
+            idx: Index of the sample (0 to len-1)
+
+        Returns:
+            Dictionary with:
+              'input_ids': tensor of word indices, shape (max_length,)
+              'labels': tensor of 6 label values, shape (6,)
+        """
+        text = self.texts[idx]
+        indices = self.vocab.encode(text, self.max_length)
+
+        return {
+            'input_ids': torch.tensor(indices, dtype=torch.long),
+            'labels': torch.tensor(self.labels[idx], dtype=torch.float32),
+        }
