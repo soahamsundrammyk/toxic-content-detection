@@ -1,0 +1,53 @@
+{
+  "model": "bilstm_glove",
+  "per_label": {
+    "toxic": {
+      "f1": 0.7367,
+      "precision": 0.84,
+      "recall": 0.656,
+      "support": 1529,
+      "roc_auc": 0.9581
+    },
+    "severe_toxic": {
+      "f1": 0.2524,
+      "precision": 0.5652,
+      "recall": 0.1625,
+      "support": 160,
+      "roc_auc": 0.9854
+    },
+    "obscene": {
+      "f1": 0.7377,
+      "precision": 0.8111,
+      "recall": 0.6765,
+      "support": 844,
+      "roc_auc": 0.9713
+    },
+    "threat": {
+      "f1": 0.4,
+      "precision": 0.4595,
+      "recall": 0.3542,
+      "support": 48,
+      "roc_auc": 0.9686
+    },
+    "insult": {
+      "f1": 0.6531,
+      "precision": 0.7297,
+      "recall": 0.5911,
+      "support": 790,
+      "roc_auc": 0.9677
+    },
+    "identity_hate": {
+      "f1": 0.2703,
+      "precision": 0.5682,
+      "recall": 0.1773,
+      "support": 141,
+      "roc_auc": 0.9737
+    }
+  },
+  "macro": {
+    "f1": 0.5084,
+    "precision": 0.6623,
+    "recall": 0.4363,
+    "roc_auc": 0.9708
+  }
+}
