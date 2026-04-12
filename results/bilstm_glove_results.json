@@ -2,52 +2,52 @@
   "model": "bilstm_glove",
   "per_label": {
     "toxic": {
-      "f1": 0.7309,
-      "precision": 0.7812,
-      "recall": 0.6867,
+      "f1": 0.7285,
+      "precision": 0.6909,
+      "recall": 0.7704,
       "support": 1529,
-      "roc_auc": 0.9544
+      "roc_auc": 0.9584
     },
     "severe_toxic": {
-      "f1": 0.4306,
-      "precision": 0.4844,
-      "recall": 0.3875,
+      "f1": 0.4716,
+      "precision": 0.3624,
+      "recall": 0.675,
       "support": 160,
-      "roc_auc": 0.9854
+      "roc_auc": 0.9856
     },
     "obscene": {
-      "f1": 0.7323,
-      "precision": 0.8206,
-      "recall": 0.6611,
+      "f1": 0.721,
+      "precision": 0.6778,
+      "recall": 0.7701,
       "support": 844,
-      "roc_auc": 0.9651
+      "roc_auc": 0.9687
     },
     "threat": {
-      "f1": 0.5,
-      "precision": 0.625,
-      "recall": 0.4167,
+      "f1": 0.512,
+      "precision": 0.4156,
+      "recall": 0.6667,
       "support": 48,
-      "roc_auc": 0.9752
+      "roc_auc": 0.9788
     },
     "insult": {
-      "f1": 0.6697,
-      "precision": 0.6885,
-      "recall": 0.6519,
+      "f1": 0.6667,
+      "precision": 0.6037,
+      "recall": 0.7443,
       "support": 790,
-      "roc_auc": 0.9657
+      "roc_auc": 0.9687
     },
     "identity_hate": {
-      "f1": 0.3737,
-      "precision": 0.6491,
-      "recall": 0.2624,
+      "f1": 0.4684,
+      "precision": 0.4922,
+      "recall": 0.4468,
       "support": 141,
-      "roc_auc": 0.9671
+      "roc_auc": 0.9778
     }
   },
   "macro": {
-    "f1": 0.5729,
-    "precision": 0.6748,
-    "recall": 0.5111,
-    "roc_auc": 0.9688
+    "f1": 0.5947,
+    "precision": 0.5404,
+    "recall": 0.6789,
+    "roc_auc": 0.973
   }
 }
