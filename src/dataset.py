@@ -380,3 +380,78 @@ class ToxicDataset(Dataset):
             'input_ids': torch.tensor(indices, dtype=torch.long),
             'labels': torch.tensor(self.labels[idx], dtype=torch.float32),
         }
+
+
+# ============================================================================
+# PHASE 3: RoBERTa Dataset
+# ============================================================================
+
+
+class ToxicDatasetRoBERTa(Dataset):
+    """PyTorch Dataset that uses RoBERTa's BPE tokenizer.
+
+    Unlike ToxicDataset (Phase 2) which used our hand-built vocabulary
+    and simple word splitting, this uses RoBERTa's pre-trained tokenizer.
+
+    The tokenizer handles:
+      - Subword splitting (BPE): "unhappy" → ["un", "happy"]
+      - Adding special tokens: <s> at start, </s> at end
+      - Converting tokens to integer IDs
+      - Padding to max_length
+      - Truncation if text is too long
+      - Creating attention_mask (1 for real tokens, 0 for padding)
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        tokenizer,
+        max_length: int = 256,
+    ):
+        """
+        Args:
+            df: DataFrame with 'comment_text' and the 6 label columns
+            tokenizer: A RoBERTa tokenizer (from transformers library)
+            max_length: Maximum sequence length.
+                        RoBERTa was trained with max 512, but we use 256
+                        to save memory on our 16GB M3.
+                        256 covers ~90% of our comments without truncation.
+        """
+        self.texts = df['comment_text'].tolist()
+        self.labels = df[LABEL_COLS].values.astype(np.float32)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+    def __len__(self) -> int:
+        """How many samples in the dataset."""
+        return len(self.texts)
+
+    def __getitem__(self, idx: int) -> dict:
+        """Get one sample by index.
+
+        The tokenizer does ALL the work — splits into subwords,
+        adds special tokens, pads, creates attention mask.
+
+        Returns dictionary with:
+          'input_ids': token IDs, shape (max_length,)
+          'attention_mask': 1s for real tokens, 0s for padding, shape (max_length,)
+          'labels': the 6 toxicity labels, shape (6,)
+        """
+        text = self.texts[idx]
+
+        # Tokenize — one line does it all
+        encoding = self.tokenizer(
+            text,
+            max_length=self.max_length,
+            padding='max_length',      # pad to max_length with 0s
+            truncation=True,            # cut off if longer than max_length
+            return_tensors='pt',        # return PyTorch tensors
+        )
+
+        # encoding['input_ids'] has shape (1, max_length) because of batching
+        # We squeeze to get (max_length,) since this Dataset returns one sample
+        return {
+            'input_ids': encoding['input_ids'].squeeze(0),
+            'attention_mask': encoding['attention_mask'].squeeze(0),
+            'labels': torch.tensor(self.labels[idx], dtype=torch.float32),
+        }
