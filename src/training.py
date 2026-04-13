@@ -375,3 +375,231 @@ def train_model(
         print(f"Restored best model (val_loss: {best_val_loss:.4f})")
 
     return history
+
+
+# ============================================================================
+# PHASE 3: RoBERTa training functions
+# ============================================================================
+#
+# RoBERTa needs attention_mask in addition to input_ids.
+# We also use gradient accumulation to simulate larger batch sizes
+# without running out of memory.
+
+
+def train_one_epoch_roberta(
+    model: nn.Module,
+    dataloader: DataLoader,
+    loss_fn: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    accumulation_steps: int = 1,
+    scheduler: Optional[object] = None,
+) -> float:
+    """Train RoBERTa for one epoch with gradient accumulation.
+
+    GRADIENT ACCUMULATION:
+        Instead of updating weights after every batch of 8,
+        we accumulate gradients over multiple batches before updating.
+
+        accumulation_steps=2 means:
+          batch 1: compute gradients, DO NOT update weights
+          batch 2: compute gradients, ADD to saved gradients, UPDATE weights
+          (effective batch size = 8 × 2 = 16)
+
+        This lets us get the benefit of larger batches without the memory cost.
+
+    Args:
+        model: RoBERTa classifier
+        dataloader: Training batches (with input_ids, attention_mask, labels)
+        loss_fn: Loss function (FocalLoss)
+        optimizer: AdamW optimizer
+        device: MPS or CPU
+        accumulation_steps: How many batches to accumulate before updating
+        scheduler: Optional learning rate scheduler (step after each update)
+
+    Returns:
+        Average training loss for this epoch
+    """
+    model.train()
+    total_loss = 0.0
+    n_batches = 0
+
+    # Clear gradients once at the start
+    optimizer.zero_grad()
+
+    for batch_idx, batch in enumerate(dataloader):
+        # Move all three tensors to device
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+
+        # Forward pass
+        logits = model(input_ids, attention_mask)
+        loss = loss_fn(logits, labels)
+
+        # Normalize loss by accumulation steps
+        # This keeps the gradient magnitude similar regardless of accumulation_steps
+        loss = loss / accumulation_steps
+
+        # Backward pass: compute gradients (but do NOT update yet)
+        loss.backward()
+
+        total_loss += loss.item() * accumulation_steps  # un-normalize for logging
+        n_batches += 1
+
+        # Update weights every `accumulation_steps` batches
+        if (batch_idx + 1) % accumulation_steps == 0:
+            # Clip gradients to prevent instability in transformers
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+            # Apply accumulated gradients
+            optimizer.step()
+
+            # Update learning rate schedule (if using one)
+            if scheduler is not None:
+                scheduler.step()
+
+            # Clear for next accumulation cycle
+            optimizer.zero_grad()
+
+    return total_loss / n_batches
+
+
+@torch.no_grad()
+def evaluate_roberta(
+    model: nn.Module,
+    dataloader: DataLoader,
+    loss_fn: nn.Module,
+    device: torch.device,
+) -> Dict:
+    """Evaluate RoBERTa on a dataset.
+
+    Similar to evaluate() but handles attention_mask.
+    """
+    model.eval()
+    total_loss = 0.0
+    n_batches = 0
+    all_probs = []
+    all_labels = []
+
+    for batch in dataloader:
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+
+        logits = model(input_ids, attention_mask)
+        loss = loss_fn(logits, labels)
+
+        probs = torch.sigmoid(logits)
+
+        total_loss += loss.item()
+        n_batches += 1
+
+        all_probs.append(probs.cpu().numpy())
+        all_labels.append(labels.cpu().numpy())
+
+    all_probs = np.concatenate(all_probs, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+
+    return {
+        'loss': total_loss / n_batches,
+        'probabilities': all_probs,
+        'predictions': (all_probs >= 0.5).astype(int),
+        'labels': all_labels,
+    }
+
+
+def train_roberta(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    loss_fn: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    n_epochs: int = 3,
+    patience: int = 2,
+    accumulation_steps: int = 2,
+    scheduler: Optional[object] = None,
+    save_path: Optional[str] = None,
+) -> Dict:
+    """Full training loop for RoBERTa with early stopping and gradient accumulation.
+
+    Transformer fine-tuning needs FEWER epochs than LSTM training:
+      - The model is already well-trained (pre-training)
+      - We just need to adapt it to our task
+      - 2-4 epochs usually enough
+      - More epochs risk overfitting and destroying pre-trained knowledge
+
+    Args:
+        model: RoBERTa classifier
+        train_loader: Training batches
+        val_loader: Validation batches
+        loss_fn: FocalLoss or BCE
+        optimizer: AdamW (with low learning rate like 2e-5)
+        device: MPS or CPU
+        n_epochs: Max epochs (transformers need fewer — 3 is typical)
+        patience: Early stopping patience (2 is typical)
+        accumulation_steps: Gradient accumulation steps
+        scheduler: Optional learning rate scheduler
+        save_path: Optional path to save best model
+
+    Returns:
+        Training history dict
+    """
+    best_val_loss = float('inf')
+    epochs_without_improvement = 0
+    history = {'train_loss': [], 'val_loss': []}
+    best_state = None
+
+    print(f"Training RoBERTa for up to {n_epochs} epochs (patience={patience})...")
+    print(f"Gradient accumulation: {accumulation_steps} steps "
+          f"(effective batch size = {train_loader.batch_size * accumulation_steps})")
+    print(f"{'Epoch':>6s} | {'Train Loss':>10s} | {'Val Loss':>10s} | {'Time':>6s} | {'Status':>15s}")
+    print("-" * 65)
+
+    for epoch in range(n_epochs):
+        start_time = time.time()
+
+        train_loss = train_one_epoch_roberta(
+            model, train_loader, loss_fn, optimizer, device,
+            accumulation_steps=accumulation_steps,
+            scheduler=scheduler,
+        )
+
+        val_results = evaluate_roberta(model, val_loader, loss_fn, device)
+        val_loss = val_results['loss']
+
+        elapsed = time.time() - start_time
+
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_without_improvement = 0
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            status = "* new best *"
+            if save_path:
+                torch.save(model.state_dict(), save_path)
+        else:
+            epochs_without_improvement += 1
+            status = f"no improve ({epochs_without_improvement}/{patience})"
+
+        print(
+            f"{epoch+1:>6d} | "
+            f"{train_loss:>10.4f} | "
+            f"{val_loss:>10.4f} | "
+            f"{elapsed:>5.1f}s | "
+            f"{status:>15s}"
+        )
+
+        if epochs_without_improvement >= patience:
+            print(f"\nEarly stopping: no improvement for {patience} epochs.")
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        model.to(device)
+        print(f"Restored best model (val_loss: {best_val_loss:.4f})")
+
+    return history
