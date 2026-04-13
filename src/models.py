@@ -2,7 +2,7 @@
 Neural network model definitions for toxicity classification.
 
 Phase 2: BiLSTM with GloVe embeddings
-Phase 3: RoBERTa fine-tuning wrapper (added later)
+Phase 3: RoBERTa fine-tuning wrapper
 """
 
 import torch
@@ -227,3 +227,104 @@ def load_glove_embeddings(
     print(f"GloVe: found vectors for {found:,}/{vocab_size:,} words ({coverage:.1f}% coverage)")
 
     return embeddings.astype(np.float32)
+
+
+# ============================================================================
+# PHASE 3: RoBERTa Fine-tuning
+# ============================================================================
+
+
+class RoBERTaClassifier(nn.Module):
+    """Fine-tuned RoBERTa for multilabel toxicity classification.
+
+    Architecture:
+        tokenized text → RoBERTa encoder → [CLS] token output → dropout → linear → logits
+
+    The [CLS] token (first token) is designed by RoBERTa's training to be
+    a summary of the whole input. We use this as our feature for classification.
+
+    This is TRANSFER LEARNING: we load RoBERTa's pre-trained weights
+    (trained on 160GB of text) and fine-tune them on our 127K comments.
+    Unlike GloVe (frozen), we DO update RoBERTa's weights during training.
+    """
+
+    def __init__(
+        self,
+        num_labels: int = 6,
+        model_name: str = 'roberta-base',
+        dropout: float = 0.1,
+    ):
+        """
+        Args:
+            num_labels: Number of output labels (6 for Jigsaw)
+            model_name: Which pre-trained model to use.
+                        'roberta-base' = 125M parameters, 768 hidden dim
+                        'roberta-large' = 355M parameters (too big for our M3)
+            dropout: Dropout probability for the classification head.
+                     0.1 is standard for transformer fine-tuning
+                     (lower than LSTM's 0.3 because the model is already regularized
+                     by pre-training).
+        """
+        super().__init__()
+
+        # Import here to avoid forcing transformers install at module load
+        from transformers import RobertaModel
+
+        # Load pre-trained RoBERTa
+        # This downloads ~500MB the first time (cached for future use)
+        self.roberta = RobertaModel.from_pretrained(model_name)
+
+        # RoBERTa's hidden dimension (768 for roberta-base)
+        hidden_size = self.roberta.config.hidden_size
+
+        # Dropout before the classifier
+        self.dropout = nn.Dropout(dropout)
+
+        # Classification head: a single linear layer
+        # Input: 768 dims ([CLS] token vector)
+        # Output: 6 dims (one score per label)
+        self.classifier = nn.Linear(hidden_size, num_labels)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass: tokenized text → toxicity logits.
+
+        Args:
+            input_ids: Tokenized input from RoBERTa tokenizer.
+                       Shape: (batch_size, seq_length)
+                       Each value is a token ID in RoBERTa's vocabulary.
+
+            attention_mask: 1 for real tokens, 0 for padding.
+                            Shape: (batch_size, seq_length)
+                            Tells RoBERTa which positions to ignore (padding).
+
+        Returns:
+            Logits of shape (batch_size, num_labels)
+        """
+        # Step 1: Run RoBERTa encoder
+        # outputs is a special object containing:
+        #   - last_hidden_state: shape (batch_size, seq_length, 768)
+        #     → one 768-dim vector per token
+        #   - pooler_output: shape (batch_size, 768)
+        #     → a pooled representation (not what we use)
+        outputs = self.roberta(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+
+        # Step 2: Extract the [CLS] token's output (first token, index 0)
+        # Shape: (batch_size, 768)
+        # This vector summarizes the whole input.
+        cls_output = outputs.last_hidden_state[:, 0, :]
+
+        # Step 3: Apply dropout
+        dropped = self.dropout(cls_output)
+
+        # Step 4: Linear classification head → logits
+        # Shape: (batch_size, num_labels) = (batch_size, 6)
+        logits = self.classifier(dropped)
+
+        return logits
