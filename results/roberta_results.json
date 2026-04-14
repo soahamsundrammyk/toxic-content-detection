@@ -1,0 +1,54 @@
+{
+  "per_label": {
+    "toxic": {
+      "f1": 0.8333,
+      "precision": 0.7864,
+      "recall": 0.8862,
+      "roc_auc": 0.9888,
+      "support": 1529
+    },
+    "severe_toxic": {
+      "f1": 0.5013,
+      "precision": 0.4408,
+      "recall": 0.5813,
+      "roc_auc": 0.9903,
+      "support": 160
+    },
+    "obscene": {
+      "f1": 0.8271,
+      "precision": 0.7622,
+      "recall": 0.904,
+      "roc_auc": 0.9945,
+      "support": 844
+    },
+    "threat": {
+      "f1": 0.5812,
+      "precision": 0.4928,
+      "recall": 0.7083,
+      "roc_auc": 0.9969,
+      "support": 48
+    },
+    "insult": {
+      "f1": 0.7651,
+      "precision": 0.6815,
+      "recall": 0.8722,
+      "roc_auc": 0.9901,
+      "support": 790
+    },
+    "identity_hate": {
+      "f1": 0.5868,
+      "precision": 0.5078,
+      "recall": 0.695,
+      "roc_auc": 0.9918,
+      "support": 141
+    }
+  },
+  "macro": {
+    "f1": 0.6825,
+    "precision": 0.6119,
+    "recall": 0.7745,
+    "roc_auc": 0.9921
+  },
+  "model": "roberta",
+  "best_threshold": 0.45
+}
